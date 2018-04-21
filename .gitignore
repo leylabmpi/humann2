@@ -1,0 +1,8 @@
+*egg-info
+examples/
+archive/
+build/
+*_DEMO
+test*.sh
+.envrc
+.#*
