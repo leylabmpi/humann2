@@ -2,6 +2,7 @@
 examples/
 archive/
 build/
+dist/
 counter.txt
 *_DEMO
 test*.sh
