@@ -2,6 +2,7 @@
 examples/
 archive/
 build/
+counter.txt
 *_DEMO
 test*.sh
 .envrc

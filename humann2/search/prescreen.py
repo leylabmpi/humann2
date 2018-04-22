@@ -41,7 +41,7 @@ def alignment(input):
    
     exe="metaphlan2.py"
     opts=config.metaphlan_opts  
-
+    
     # find the location of the metaphlan dir
     metaphlan_dir=utilities.return_exe_path(exe)
  
@@ -52,20 +52,29 @@ def alignment(input):
     bug_file = utilities.name_temp_file(config.bugs_list_name)
     bowtie2_out = utilities.name_temp_file(config.metaphlan_bowtie2_name) 
 
-    args=[input]+opts+["-o",bug_file,"--input_type",input_type, "--bowtie2out",bowtie2_out]
-    
-    if config.threads >1:
-        args+=["--nproc",config.threads]
-
+    # command execution
     message="Running " + exe + " ........"
     logger.info(message)
     print("\n"+message+"\n")
-    utilities.execute_command(exe, args, [input], [bug_file, bowtie2_out])
+
+    ## compressed or uncompressed input?
+    if config.compressed_input:
+        exe_list = ['pigz', exe]
+        args1 = ['-d', '-c', '-p', config.threads, input]
+        args2 = opts + ['-o', bug_file, '--input_type', input_type,
+                        '--bowtie2out', bowtie2_out, '--nproc', config.threads]
+        args_list = [args1, args2]
+        utilities.execute_pipe(exe_list, args_list, [input], [bug_file, bowtie2_out])
+    else:
+        args = [input] + opts + ['-o', bug_file, '--input_type', input_type,
+                                 '--bowtie2out', bowtie2_out, '--nproc', config.threads]
+        utilities.execute_command(exe, args, [input], [bug_file, bowtie2_out])
 
     if config.compress == True:
         msg = 'Compressing metaphlan2 bowtie2 output...'
         utilities.compress(bowtie2_out, msg, threads=config.threads)
     return bug_file
+
 
 def create_custom_database(chocophlan_dir, bug_file):
     """

@@ -29,6 +29,7 @@ import subprocess
 import re
 import shutil
 import tempfile
+import gzip
 
 # try to import urllib.request.urlretrieve for python3
 try:
@@ -207,18 +208,30 @@ def remove_spaces_from_file(file):
     """ Remove any spaces in the file, creating a new file of the output """
     
     # create an unnamed temp file
-    new_file=unnamed_temp_file()
-    
-    try:
-        file_handle_read = open(file, "rt")
-        file_handle_write = open(new_file, "wt")
-        for line in file_handle_read:
-            file_handle_write.write(line.replace(" ",""))
-        file_handle_read.close()
-        file_handle_write.close()
-    except (EnvironmentError, UnicodeDecodeError):
-        logger.info("Unable to write new file after removing spaces in identifier")
-        new_file=""
+    new_file = unnamed_temp_file() + '.gz'
+
+    if file.endswith('.gz'):
+        try:
+            file_handle_read = gzip.open(file, "rb")
+            file_handle_write = gzip.open(new_file, "wb")
+            for line in file_handle_read:
+                file_handle_write.write(line.decode('utf8').replace(" ",""))
+            file_handle_read.close()
+            file_handle_write.close()
+        except (EnvironmentError, UnicodeDecodeError):
+            logger.info("Unable to write new file after removing spaces in identifier")
+            new_file=""
+    else:
+        try:
+            file_handle_read = open(file, "rt")
+            file_handle_write = open(new_file, "wt")
+            for line in file_handle_read:
+                file_handle_write.write(line.replace(" ",""))
+            file_handle_read.close()
+            file_handle_write.close()
+        except (EnvironmentError, UnicodeDecodeError):
+            logger.info("Unable to write new file after removing spaces in identifier")
+            new_file=""
         
     return new_file
 
@@ -632,16 +645,19 @@ def execute_command_args_convert(args):
     """
     Convert the list of args to function arguments
     """
-    
     return execute_command(*args)
 
+def execute_command_args_convert(args):
+    """
+    Convert the list of args to function arguments
+    """
+    return execute_command(*args)
 
 def execute_command(exe, args, infiles, outfiles, stdout_file=None, 
         stdin_file=None, raise_error=None, stderr_file=None):
     """
     Execute third party software or shell command with files
-    """
-	
+    """	
     if exe == sys.executable:
         # check that the python module can be found
         module_path=return_module_path(args[0])
@@ -683,9 +699,9 @@ def execute_command(exe, args, infiles, outfiles, stdout_file=None,
     # convert numbers to strings
     args=[str(i) for i in args]
 
-    if not bypass:
-        
-        cmd=[exe]+args
+    # execute command
+    if not bypass:        
+        cmd = [exe] + args
 
         message=" ".join(cmd)
         logger.info("Execute command: "+ message)
@@ -766,6 +782,99 @@ def execute_command(exe, args, infiles, outfiles, stdout_file=None,
         else:
             print("Bypass\n")
 
+
+def check_exe(exe):
+    """
+    Check if executable exists
+    """
+    if exe == sys.executable:
+        # check that the python module can be found
+        module_path=return_module_path(args[0])
+        if not module_path:
+            message="Can not find python module " + args[0]
+            logger.critical(message)
+            if raise_error:
+                raise EnvironmentError
+            else:
+                sys.exit("CRITICAL ERROR: " + message)
+        # update the module to the full path if not already the full path
+        elif not os.path.isabs(args[0]):
+            args[0]=os.path.join(module_path,args[0])
+            
+        logger.debug("Using python module : " + args[0])
+    else:
+        # check that the executable can be found
+        exe_path=return_exe_path(exe)
+        if not exe_path:
+            message="Can not find executable " + exe
+            logger.critical(message)
+            if raise_error:
+                raise EnvironmentError
+            else:
+                sys.exit("CRITICAL ERROR: " + message)
+        # update the executable to the full path
+        else:
+            exe=os.path.join(exe_path,exe)
+	
+        logger.debug("Using software: " + exe)
+                
+def execute_pipe(exe_list, args_list, infiles, outfiles, raise_error=None):
+    """
+    Execute third party software or shell command with files. Using bash piping.
+    exe : 1d list of executable strings
+    args_list : 2d list of args for each exe (1 1d list per exe)
+    infiles : input files for entire command
+    outfiles : output files for entire command
+    """
+    assert len(exe_list) == len(args_list)
+    for exe in exe_list:
+        check_exe(exe)
+    
+    # check that the input files exist and are readable
+    for file in infiles:
+        file_exists_readable(file, raise_IOError=raise_error)
+        
+    # check if outfiles already exist
+    bypass=check_outfiles(outfiles)
+
+    # running command (if not bypass)
+    if not bypass:
+        # creating piped processes
+        cmds = []
+        procs = []
+        for i in range(len(exe_list)):
+            args = [str(x) for x in args_list[i]]
+            cmd = [exe_list[i]] + args
+            cmds.append(' '.join(cmd))
+            if i == 0:
+                stdin = None
+            else:
+                stdin = procs[i-1].stdout
+            p = subprocess.Popen([exe_list[i]] + args,
+                                 stdin=stdin, stdout=subprocess.PIPE)
+            procs.append(p)
+
+        # notification
+        message=' | '.join(cmds)
+        logger.info('Execute command: ' + message)
+        if config.verbose:
+            print('\n' + message + '\n')
+
+        # runnig command
+        stdout_ret = procs[-1].communicate()[0]
+        for p in procs:
+            p.stdout.close()
+
+        # check that the output files exist and are readable
+        for file in outfiles:
+            file_exists_readable(file, raise_IOError=raise_error)
+    # if bypass, notify
+    else:
+        if config.verbose:
+            print("Bypass: \n" + ' | '.join(exe_list) + '\n')
+        else:
+            print("Bypass\n")
+            
 def fasta_or_fastq(file):
     """
     Check to see if a file is of fasta or fastq format
@@ -789,10 +898,17 @@ def fasta_or_fastq(file):
     file_exists_readable(file)
 	
     # read in first 2 lines of file to check format
-    file_handle = open(file, "rt")
-	
-    first_line = file_handle.readline()
-    second_line = file_handle.readline()
+    if file.endswith('.gz'):
+        file_handle = gzip.open(file, 'rb')
+    else:
+        file_handle = open(file, "rt")
+
+    try:
+        first_line = file_handle.readline().decode('utf8')
+        second_line = file_handle.readline().decode('utf8')
+    except UnicodeDecodeError:
+        first_line = file_handle.readline()
+        second_line = file_handle.readline()
 	
     # check that second line is only nucleotides or amino acids
     if re.search("^[A-Z|a-z]+$", second_line):
@@ -803,7 +919,6 @@ def fasta_or_fastq(file):
             format="fasta"
 			
     file_handle.close()
-
     return format
 
 def count_reads(file):

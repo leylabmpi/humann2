@@ -382,6 +382,9 @@ def update_configuration(args):
     if args.protein_database:
         config.protein_database=os.path.abspath(args.protein_database)
 
+    # is input compressed?
+    config.compressed_input =  args.input.endswith('.gz')
+        
     # if set, update the config run mode to resume
     if args.resume:
         config.resume=True  
@@ -869,7 +872,7 @@ def main():
     
     # Write the config settings to the log file
     config.log_settings()
-
+    
     # Initialize alignments and gene scores
     minimize_memory_use=True
     if config.memory_use == "maximum":
@@ -902,7 +905,9 @@ def main():
 
     # Start timer
     start_time=time.time()
-
+    start_time=timestamp_message("nucleotide alignment",start_time)
+    
+    
     # Process fasta or fastq input files
     if args.input_format in ["fasta","fastq"]:
         # Run prescreen to identify bugs
